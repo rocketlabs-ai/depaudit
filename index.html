@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DepAudit — Dependency Risk Scanner</title>
+<meta name="description" content="Paste package.json or requirements.txt. Get instant risk flags, bloat warnings, and upgrade suggestions.">
+<meta property="og:title" content="DepAudit — Dependency Risk Scanner">
+<meta property="og:description" content="Scan your dependencies for known vulnerabilities, bloat, and risky version patterns.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;
+  --accent:#bc8cff;--accent-hover:#d4b0ff;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#58a6ff;
+  --radius:8px;
+  --font-sans:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+}
+html{font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);min-height:100dvh;line-height:1.6}
+.container{max-width:900px;margin:0 auto;padding:24px 16px 80px}
+header{text-align:center;margin-bottom:32px;padding-top:28px}
+h1{font-size:clamp(1.8rem,4vw,2.4rem);font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
+h1 .accent{color:var(--accent)}
+.subtitle{color:var(--muted);font-size:.9rem}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+
+textarea{
+  width:100%;min-height:200px;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px 16px;color:var(--text);font-family:var(--font-mono);font-size:.82rem;
+  line-height:1.5;resize:vertical;outline:none;tab-size:2;
+}
+textarea:focus{border-color:var(--accent)}
+textarea::placeholder{color:var(--muted)}
+
+.controls{display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap}
+.btn{
+  background:var(--accent);color:#fff;border:none;border-radius:var(--radius);
+  padding:10px 20px;font-family:var(--font-sans);font-weight:600;font-size:.88rem;
+  cursor:pointer;transition:background .2s,transform .1s;white-space:nowrap;
+}
+.btn:hover{background:var(--accent-hover)}
+.btn:active{transform:scale(0.97)}
+.btn--secondary{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn--secondary:hover{border-color:var(--muted);background:var(--surface)}
+
+/* Score */
+.score-bar{
+  display:flex;align-items:center;gap:16px;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 20px;margin-bottom:24px;flex-wrap:wrap;
+}
+.score-number{font-size:2rem;font-weight:700;font-family:var(--font-mono)}
+.score-label{color:var(--muted);font-size:.85rem}
+.score-meter{flex:1;min-width:120px;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.score-fill{height:100%;border-radius:4px;transition:width .4s ease}
+.score-summary{width:100%;margin-top:8px;font-size:.85rem;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+.score-summary span{display:flex;align-items:center;gap:4px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot--red{background:var(--red)}.dot--yellow{background:var(--yellow)}.dot--blue{background:var(--blue)}.dot--green{background:var(--green)}
+
+/* Output */
+.output{margin-top:28px;display:none}
+.output-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+.output-header h2{font-size:1.1rem;font-weight:600}
+
+.section{margin-bottom:24px}
+.section-title{
+  font-size:.82rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;
+  padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:10px;
+  display:flex;align-items:center;gap:8px;
+}
+.badge{font-size:.7rem;font-weight:600;padding:2px 8px;border-radius:10px;text-transform:none;letter-spacing:0}
+.badge--red{background:rgba(248,81,73,.15);color:var(--red)}
+.badge--yellow{background:rgba(210,153,34,.15);color:var(--yellow)}
+.badge--blue{background:rgba(88,166,255,.15);color:var(--blue)}
+.badge--green{background:rgba(63,185,80,.15);color:var(--green)}
+
+.finding{
+  padding:10px 0;border-bottom:1px solid rgba(48,54,61,0.3);
+  display:flex;gap:10px;align-items:flex-start;
+}
+.finding:last-child{border-bottom:none}
+.finding-icon{font-size:1.1rem;flex-shrink:0;width:24px;text-align:center}
+.finding-pkg{font-family:var(--font-mono);font-size:.85rem;font-weight:500;min-width:140px;flex-shrink:0}
+.finding-msg{font-size:.88rem;color:var(--muted);flex:1}
+.finding-alt{color:var(--green);font-weight:500}
+
+.md-raw{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 20px;font-family:var(--font-mono);font-size:.8rem;line-height:1.7;
+  white-space:pre-wrap;word-break:break-word;color:var(--muted);
+  max-height:500px;overflow-y:auto;display:none;
+}
+.clean-msg{text-align:center;padding:24px;color:var(--green);font-size:1rem;font-weight:500}
+.toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:var(--green);color:#fff;padding:10px 24px;border-radius:var(--radius);
+  font-size:.9rem;font-weight:500;opacity:0;transition:all .3s ease;
+  pointer-events:none;z-index:100;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+footer{text-align:center;margin-top:48px;padding-top:24px;border-top:1px solid var(--border);font-size:.8rem;color:var(--muted)}
+
+@media(max-width:520px){
+  .controls{flex-direction:column}
+  .btn{width:100%}
+  .finding{flex-direction:column;gap:4px}
+  .finding-pkg{min-width:auto}
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>Dep<span class="accent">Audit</span></h1>
+    <p class="subtitle">Paste package.json or requirements.txt. Get instant risk flags.</p>
+  </header>
+
+  <label for="depInput" class="sr-only">Paste package manifest</label>
+  <textarea id="depInput" placeholder='Paste your package.json, requirements.txt, or just the dependencies section...&#10;&#10;Example:&#10;{&#10;  "dependencies": {&#10;    "express": "^4.18.0",&#10;    "lodash": "*"&#10;  }&#10;}'></textarea>
+
+  <div class="controls">
+    <button class="btn" onclick="audit()">Audit</button>
+    <button class="btn btn--secondary" onclick="loadExample('npm')">Example (npm)</button>
+    <button class="btn btn--secondary" onclick="loadExample('pip')">Example (pip)</button>
+    <button class="btn btn--secondary" onclick="clearAll()">Clear</button>
+  </div>
+
+  <div id="output" class="output">
+    <div class="output-header">
+      <h2 id="reportTitle">Audit Report</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn--secondary" onclick="copyMarkdown()">Copy Markdown</button>
+        <button class="btn btn--secondary" onclick="toggleRaw()">View Raw</button>
+      </div>
+    </div>
+    <div id="scoreBar"></div>
+    <div id="mdRaw" class="md-raw"></div>
+    <div id="findings"></div>
+  </div>
+
+  <footer>Built by Rocket Labs AI</footer>
+</div>
+
+<div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+function showToast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2000)}
+
+// ─── Known-Bad Package Database ──────────────────────────────
+const KNOWN_BAD = {
+  // Supply chain attacks / malicious
+  'event-stream':     { severity: 'critical', reason: 'Supply chain attack (2018) — injected crypto-stealing malware', alt: null },
+  'flatmap-stream':   { severity: 'critical', reason: 'Malicious package injected via event-stream', alt: null },
+  'ua-parser-js':     { severity: 'critical', reason: 'Compromised (2021) — cryptominer injected in v0.7.29/0.8.0/1.0.0', alt: null },
+  'coa':              { severity: 'critical', reason: 'Compromised (2021) — malicious code in v2.0.3+', alt: null },
+  'rc':               { severity: 'critical', reason: 'Compromised (2021) — malicious code in v1.2.9+', alt: null },
+  'colors':           { severity: 'critical', reason: 'Sabotaged by maintainer (2022) — infinite loop in v1.4.1+', alt: 'chalk, picocolors, kleur' },
+  'faker':            { severity: 'critical', reason: 'Sabotaged by maintainer (2022) — published empty/broken v6+', alt: '@faker-js/faker' },
+  'node-ipc':         { severity: 'critical', reason: 'Protestware (2022) — wiped files on Russian/Belarusian IPs', alt: null },
+  'peacenotwar':      { severity: 'critical', reason: 'Protestware payload delivered via node-ipc', alt: null },
+
+  // Deprecated / unmaintained
+  'left-pad':         { severity: 'high', reason: 'Deprecated — famously unpublished (2016), functionality is trivial', alt: 'String.prototype.padStart()' },
+  'request':          { severity: 'high', reason: 'Deprecated since 2020 — no security patches', alt: 'got, node-fetch, axios, undici' },
+  'nomnom':           { severity: 'high', reason: 'Unmaintained since 2014', alt: 'commander, yargs, meow' },
+  'optimist':         { severity: 'high', reason: 'Deprecated — replaced by minimist/yargs', alt: 'yargs, minimist, commander' },
+  'jade':             { severity: 'high', reason: 'Renamed to pug — jade is unmaintained', alt: 'pug' },
+  'istanbul':         { severity: 'high', reason: 'Deprecated — replaced by nyc/c8', alt: 'c8, nyc' },
+  'tslint':           { severity: 'high', reason: 'Deprecated (2019) — migrated to eslint', alt: 'eslint + @typescript-eslint' },
+  'bower':            { severity: 'high', reason: 'Deprecated — use npm/yarn/pnpm', alt: 'npm' },
+  'popper.js':        { severity: 'medium', reason: 'Deprecated — replaced by @popperjs/core', alt: '@popperjs/core' },
+  'node-uuid':        { severity: 'medium', reason: 'Deprecated — renamed to uuid', alt: 'uuid' },
+  'mkdirp':           { severity: 'low', reason: 'fs.mkdirSync({ recursive: true }) available since Node 10', alt: 'fs.mkdirSync({ recursive: true })' },
+  'rimraf':           { severity: 'low', reason: 'fs.rmSync({ recursive: true }) available since Node 14', alt: 'fs.rmSync({ recursive: true })' },
+
+  // Bloat — lighter alternatives exist
+  'moment':           { severity: 'medium', reason: 'Bloated (300KB+), maintenance mode since 2020', alt: 'dayjs (2KB), date-fns, luxon' },
+  'moment-timezone':  { severity: 'medium', reason: 'Depends on moment — same bloat issue', alt: 'dayjs/plugin/timezone, date-fns-tz' },
+  'lodash':           { severity: 'low', reason: 'Large bundle — most methods have native equivalents', alt: 'lodash-es (tree-shakeable), native JS' },
+  'underscore':       { severity: 'low', reason: 'Superseded by lodash and native JS', alt: 'native JS, lodash-es' },
+  'jquery':           { severity: 'low', reason: 'Unnecessary in modern frameworks — native DOM API is sufficient', alt: 'native DOM API' },
+  'bluebird':         { severity: 'low', reason: 'Native Promises are fast enough since Node 12+', alt: 'native Promise' },
+  'async':            { severity: 'low', reason: 'async/await makes most patterns native', alt: 'async/await, Promise.all' },
+  'uuid':             { severity: 'info', reason: 'crypto.randomUUID() available in Node 19+ and all modern browsers', alt: 'crypto.randomUUID()' },
+  'axios':            { severity: 'info', reason: 'fetch() is globally available in Node 18+ — axios adds 40KB', alt: 'native fetch, got, ky' },
+  'node-fetch':       { severity: 'info', reason: 'Native fetch available in Node 18+', alt: 'native fetch' },
+  'cross-env':        { severity: 'info', reason: 'npm 9+ supports cross-platform env vars natively', alt: 'npm --env' },
+
+  // Python known-bad
+  'pycrypto':         { severity: 'critical', reason: 'Unmaintained, known vulnerabilities — use pycryptodome', alt: 'pycryptodome' },
+  'django-picklefield':{ severity: 'high', reason: 'Pickle deserialization is inherently unsafe', alt: 'django-jsonfield-backport, JSONField' },
+  'python-firebase':  { severity: 'high', reason: 'Unmaintained since 2015', alt: 'firebase-admin' },
+  'beautifulsoup':    { severity: 'medium', reason: 'Use beautifulsoup4 (bs4) — old package is unmaintained', alt: 'beautifulsoup4' },
+  'distribute':       { severity: 'medium', reason: 'Merged into setuptools years ago', alt: 'setuptools' },
+  'nose':             { severity: 'medium', reason: 'Unmaintained since 2016', alt: 'pytest' },
+  'fabric':           { severity: 'low', reason: 'fabric2+ is a complete rewrite — check compatibility', alt: 'fabric2, invoke' },
+  'PIL':              { severity: 'medium', reason: 'Use Pillow — PIL is unmaintained', alt: 'Pillow' },
+  'sklearn':          { severity: 'info', reason: 'Correct package name is scikit-learn', alt: 'scikit-learn' },
+};
+
+// ─── Parser ──────────────────────────────────────────────────
+function detectFormat(text) {
+  text = text.trim();
+  if (text.startsWith('{') || text.includes('"dependencies"') || text.includes('"devDependencies"'))
+    return 'npm';
+  if (/^[\w-]+==/m.test(text) || /^[\w-]+(>=|<=|~=|!=)/m.test(text) || /^-r\s/m.test(text))
+    return 'pip';
+  if (/^\s*"[\w@\/-]+"\s*:\s*"/m.test(text)) return 'npm';
+  return 'unknown';
+}
+
+function parseNpm(text) {
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    const wrapped = `{${text}}`;
+    try { obj = JSON.parse(wrapped); } catch { return null; }
+  }
+
+  const deps = [];
+  for (const section of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    if (obj[section]) {
+      for (const [name, version] of Object.entries(obj[section])) {
+        deps.push({ name, version, section, isDev: section !== 'dependencies' });
+      }
+    }
+  }
+  if (deps.length === 0 && typeof obj === 'object') {
+    for (const [name, version] of Object.entries(obj)) {
+      if (typeof version === 'string') deps.push({ name, version, section: 'dependencies', isDev: false });
+    }
+  }
+  return deps;
+}
+
+function parsePip(text) {
+  const deps = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('-')) continue;
+    const match = trimmed.match(/^([\w.-]+)\s*(?:\[.*\])?\s*(.*)/);
+    if (match) {
+      deps.push({ name: match[1], version: match[2] || '*', section: 'requirements', isDev: false });
+    }
+  }
+  return deps;
+}
+
+// ─── Analyzers ───────────────────────────────────────────────
+function analyzeVersionPattern(version) {
+  if (version === '*' || version === 'latest') return { risk: 'high', label: 'wildcard', msg: 'Wildcard version — any version will install, including breaking changes' };
+  if (/^>=/.test(version)) return { risk: 'medium', label: 'open-range', msg: 'Open range — no upper bound, may install breaking major versions' };
+  if (/^\^0\./.test(version)) return { risk: 'medium', label: 'caret-zero', msg: 'Caret on 0.x — semver treats 0.x as unstable, minor bumps can break' };
+  if (/^~/.test(version)) return { risk: 'low', label: 'tilde', msg: 'Tilde range — allows patch updates only' };
+  if (/^\^/.test(version)) return { risk: 'info', label: 'caret', msg: 'Caret range — allows minor and patch updates' };
+  if (/^\d+\.\d+\.\d+$/.test(version)) return { risk: 'info', label: 'pinned', msg: 'Pinned version — stable but may miss security patches' };
+  return null;
+}
+
+function runAudit(deps, format) {
+  const findings = { critical: [], high: [], medium: [], low: [], info: [] };
+  let score = 100;
+
+  // Check known-bad
+  for (const dep of deps) {
+    const bad = KNOWN_BAD[dep.name] || KNOWN_BAD[dep.name.toLowerCase()];
+    if (bad) {
+      findings[bad.severity].push({
+        pkg: dep.name,
+        version: dep.version,
+        msg: bad.reason,
+        alt: bad.alt,
+        type: 'known-bad'
+      });
+      const penalty = { critical: 25, high: 15, medium: 8, low: 3, info: 1 }[bad.severity];
+      score -= penalty;
+    }
+  }
+
+  // Version patterns (npm only)
+  if (format === 'npm') {
+    for (const dep of deps) {
+      const vp = analyzeVersionPattern(dep.version);
+      if (vp && (vp.risk === 'high' || vp.risk === 'medium')) {
+        findings[vp.risk].push({
+          pkg: dep.name,
+          version: dep.version,
+          msg: vp.msg,
+          type: 'version'
+        });
+        score -= vp.risk === 'high' ? 5 : 2;
+      }
+    }
+  }
+
+  // Pip unpinned
+  if (format === 'pip') {
+    for (const dep of deps) {
+      if (!dep.version || dep.version === '*' || dep.version.trim() === '') {
+        findings.medium.push({
+          pkg: dep.name,
+          version: '(unpinned)',
+          msg: 'No version specified — builds are non-reproducible',
+          type: 'version'
+        });
+        score -= 3;
+      }
+    }
+  }
+
+  // Dependency count
+  const prodDeps = deps.filter(d => !d.isDev);
+  const threshold = format === 'npm' ? 50 : 30;
+  if (prodDeps.length > threshold) {
+    findings.medium.push({
+      pkg: `${prodDeps.length} production deps`,
+      version: '',
+      msg: `Exceeds recommended threshold (${threshold}). Large dependency trees increase supply chain risk and install time.`,
+      type: 'count'
+    });
+    score -= 5;
+  }
+
+  // Duplicate-ish detection (e.g., both moment and dayjs)
+  const names = new Set(deps.map(d => d.name));
+  const overlaps = [
+    ['moment', 'dayjs'], ['moment', 'date-fns'], ['moment', 'luxon'],
+    ['lodash', 'underscore'], ['request', 'got'], ['request', 'axios'],
+    ['mocha', 'jest'], ['jasmine', 'jest'], ['tslint', 'eslint'],
+  ];
+  for (const [a, b] of overlaps) {
+    if (names.has(a) && names.has(b)) {
+      findings.low.push({
+        pkg: `${a} + ${b}`,
+        version: '',
+        msg: `Both installed — likely redundant. Pick one to reduce bundle size.`,
+        type: 'overlap'
+      });
+      score -= 2;
+    }
+  }
+
+  return { findings, score: Math.max(0, Math.min(100, score)), total: deps.length, prodCount: prodDeps.length };
+}
+
+// ─── Render ──────────────────────────────────────────────────
+let lastMarkdown = '';
+
+function audit() {
+  const text = $('depInput').value.trim();
+  if (!text) { showToast('Paste a manifest first'); return; }
+
+  const format = detectFormat(text);
+  const deps = format === 'npm' ? parseNpm(text) : format === 'pip' ? parsePip(text) : null;
+
+  if (!deps || deps.length === 0) {
+    showToast('Could not parse dependencies — check the format');
+    return;
+  }
+
+  const { findings, score, total, prodCount } = runAudit(deps, format);
+  render(findings, score, total, prodCount, format);
+  $('output').style.display = 'block';
+  $('mdRaw').style.display = 'none';
+}
+
+function render(findings, score, total, prodCount, format) {
+  const critCount = findings.critical.length;
+  const highCount = findings.high.length;
+  const medCount = findings.medium.length;
+  const lowCount = findings.low.length + findings.info.length;
+
+  // Score bar
+  const color = score >= 80 ? 'var(--green)' : score >= 60 ? 'var(--yellow)' : 'var(--red)';
+  const label = score >= 90 ? 'Excellent' : score >= 80 ? 'Good' : score >= 60 ? 'Fair' : score >= 40 ? 'Risky' : 'Critical';
+  $('scoreBar').innerHTML = `<div class="score-bar">
+    <div><div class="score-number" style="color:${color}">${score}</div><div class="score-label">${label}</div></div>
+    <div class="score-meter"><div class="score-fill" style="width:${score}%;background:${color}"></div></div>
+    <div class="score-summary">
+      <span>${total} deps (${prodCount} prod)</span>
+      <span>${format.toUpperCase()}</span>
+      ${critCount ? `<span><span class="dot dot--red"></span>${critCount} critical</span>` : ''}
+      ${highCount ? `<span><span class="dot dot--yellow"></span>${highCount} high</span>` : ''}
+      ${medCount ? `<span><span class="dot dot--blue"></span>${medCount} medium</span>` : ''}
+      ${lowCount ? `<span><span class="dot dot--green"></span>${lowCount} low/info</span>` : ''}
+    </div>
+  </div>`;
+
+  // Findings
+  const body = $('findings');
+  body.innerHTML = '';
+
+  let md = `# DepAudit Report\n\n**Score:** ${score}/100 (${label})\n**Dependencies:** ${total} (${prodCount} production)\n**Format:** ${format.toUpperCase()}\n\n`;
+
+  const levels = [
+    { key: 'critical', title: 'Critical', badge: 'red', icon: '\u{1f6a8}' },
+    { key: 'high', title: 'High', badge: 'yellow', icon: '\u26a0\ufe0f' },
+    { key: 'medium', title: 'Medium', badge: 'blue', icon: '\u{1f4cb}' },
+    { key: 'low', title: 'Low', badge: 'green', icon: '\u{1f4a1}' },
+    { key: 'info', title: 'Info', badge: 'green', icon: '\u2139\ufe0f' },
+  ];
+
+  let anyFindings = false;
+  for (const lvl of levels) {
+    const items = findings[lvl.key];
+    if (items.length === 0) continue;
+    anyFindings = true;
+
+    md += `## ${lvl.title} (${items.length})\n\n`;
+
+    const sec = document.createElement('div');
+    sec.className = 'section';
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'section-title';
+    titleDiv.textContent = lvl.title + ' ';
+    const badge = document.createElement('span');
+    badge.className = `badge badge--${lvl.badge}`;
+    badge.textContent = `${items.length} found`;
+    titleDiv.appendChild(badge);
+    sec.appendChild(titleDiv);
+
+    for (const f of items) {
+      const row = document.createElement('div');
+      row.className = 'finding';
+
+      const icon = document.createElement('span');
+      icon.className = 'finding-icon';
+      icon.textContent = lvl.icon;
+
+      const pkg = document.createElement('span');
+      pkg.className = 'finding-pkg';
+      pkg.textContent = f.pkg + (f.version ? ` ${f.version}` : '');
+
+      const msg = document.createElement('span');
+      msg.className = 'finding-msg';
+      let msgText = f.msg;
+      if (f.alt) msgText += ` → `;
+      msg.textContent = msgText;
+      if (f.alt) {
+        const alt = document.createElement('span');
+        alt.className = 'finding-alt';
+        alt.textContent = f.alt;
+        msg.appendChild(alt);
+      }
+
+      row.appendChild(icon);
+      row.appendChild(pkg);
+      row.appendChild(msg);
+      sec.appendChild(row);
+
+      md += `- **${f.pkg}**${f.version ? ` (${f.version})` : ''}: ${f.msg}`;
+      if (f.alt) md += ` → *${f.alt}*`;
+      md += '\n';
+    }
+    md += '\n';
+    body.appendChild(sec);
+  }
+
+  if (!anyFindings) {
+    body.innerHTML = '<div class="clean-msg">No issues found. Dependencies look clean.</div>';
+    md += 'No issues found.\n\n';
+  }
+
+  md += '---\n*Generated by [DepAudit](https://depaudit.vercel.app)*\n';
+  lastMarkdown = md;
+  $('reportTitle').textContent = `Audit Report — ${score}/100`;
+}
+
+function copyMarkdown() {
+  navigator.clipboard.writeText(lastMarkdown)
+    .then(() => showToast('Markdown copied!'))
+    .catch(() => showToast('Copy failed — try selecting manually'));
+}
+
+function toggleRaw() {
+  const el = $('mdRaw');
+  if (el.style.display === 'none') { el.textContent = lastMarkdown; el.style.display = 'block'; }
+  else el.style.display = 'none';
+}
+
+function clearAll() { $('depInput').value = ''; $('output').style.display = 'none'; lastMarkdown = ''; }
+
+function loadExample(type) {
+  if (type === 'npm') {
+    $('depInput').value = `{
+  "name": "legacy-app",
+  "dependencies": {
+    "express": "^4.18.2",
+    "moment": "^2.29.4",
+    "lodash": "*",
+    "request": "^2.88.2",
+    "colors": "^1.4.0",
+    "jquery": "^3.7.0",
+    "bluebird": "^3.7.2",
+    "uuid": "^9.0.0",
+    "left-pad": "^1.3.0",
+    "axios": "^1.6.0",
+    "node-fetch": "^3.3.0",
+    "mkdirp": "^3.0.1",
+    "async": "^3.2.5"
+  },
+  "devDependencies": {
+    "tslint": "^6.1.3",
+    "istanbul": "^0.4.5"
+  }
+}`;
+  } else {
+    $('depInput').value = `flask
+requests==2.28.0
+pycrypto
+beautifulsoup
+nose
+django>=3.2
+PIL
+numpy
+pandas
+scikit-learn
+SQLAlchemy`;
+  }
+  audit();
+}
+
+$('depInput').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') audit();
+});
+</script>
+
+</body>
+</html>
